@@ -1,0 +1,13 @@
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Supabase Auth (GoTrue) under the standard /auth/v1 prefix
+	handle_path /auth/v1/* {
+		reverse_proxy supabase-auth:9999
+	}
+
+	# Everything else is the Next.js app
+	handle {
+		reverse_proxy app:3000
+	}
+}

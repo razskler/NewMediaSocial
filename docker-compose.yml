@@ -1,0 +1,109 @@
+name: newmediasocial
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: https://${DOMAIN}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY:-anon-key}
+    environment:
+      MONGODB_URI: mongodb://root:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
+      MONGODB_DB: newmediasocial
+      SUPABASE_URL_INTERNAL: http://supabase-auth:9999
+      NEXT_PUBLIC_SUPABASE_URL: https://${DOMAIN}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY:-anon-key}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [internal]
+    # Uncomment to reach the app directly (bypassing Caddy) for debugging:
+    # ports:
+    #   - "127.0.0.1:3000:3000"
+
+  mongo:
+    image: mongo:8
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?Set MONGO_PASSWORD in .env}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks: [internal]
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: supabase_auth
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d supabase_auth"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [internal]
+
+  supabase-auth:
+    image: supabase/auth:v2.197.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: https://${DOMAIN}
+      GOTRUE_SITE_URL: https://${DOMAIN}
+      GOTRUE_URI_ALLOW_LIST: https://${DOMAIN}
+      DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@postgres:5432/supabase_auth?sslmode=disable
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_NAMESPACE: auth
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9999/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks: [internal]
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - supabase-auth
+    restart: unless-stopped
+    networks: [internal]
+
+volumes:
+  mongo_data:
+  pg_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
