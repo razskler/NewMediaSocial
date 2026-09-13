@@ -111,7 +111,9 @@ confirmation or password-reset emails, add SMTP settings to the
   post keeps a denormalized `likesCount`.
 - **Auth** — sessions are JWTs stored in cookies by `@supabase/ssr`; the
   Next.js middleware refreshes them transparently. Server-to-server auth
-  calls use the internal Docker network directly.
+  calls use the internal Docker network directly (a small fetch wrapper
+  strips the `/auth/v1` prefix, since bare GoTrue serves its API at the
+  root and there is no gateway in front of it).
 - **Posts** — text only, 1–500 characters, validated on the server (zod)
   inside Server Actions.
 
