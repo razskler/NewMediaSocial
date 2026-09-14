@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "NewMediaSocial",
   description:
-    "A chronological social feed — no algorithm, everyone sees everything.",
+    "Posts, photos, topics, and the people you follow — your corner of the internet.",
 };
 
 export default function RootLayout({

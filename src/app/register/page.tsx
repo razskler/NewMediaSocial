@@ -3,30 +3,74 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { checkUsernameAction } from "@/app/actions";
 import { createClient } from "@/lib/supabase/client";
+
+const inputClasses =
+  "mt-1 w-full rounded-lg border border-slate-200 p-2.5 text-sm outline-none transition focus:border-slate-400";
 
 export default function RegisterPage() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
+  const [usernameHint, setUsernameHint] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  async function checkUsername(): Promise<boolean> {
+    const value = username.trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,20}$/.test(value)) {
+      setUsernameHint(
+        value
+          ? "3–20 characters: lowercase letters, numbers, underscores."
+          : null,
+      );
+      return false;
+    }
+    setUsernameHint("Checking…");
+    const result = await checkUsernameAction(value);
+    if (result.ok) {
+      setUsernameHint(
+        result.data.available ? "Available." : "Already taken.",
+      );
+      return result.data.available;
+    }
+    setUsernameHint(null);
+    return true;
+  }
+
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (submitting) return;
     setError(null);
+
+    const normalizedUsername = username.trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,20}$/.test(normalizedUsername)) {
+      setError("Pick a valid username: 3–20 lowercase letters, numbers, underscores.");
+      return;
+    }
+    if (!(await checkUsername())) {
+      setError("That username is already taken — pick another.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const supabase = createClient();
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { display_name: displayName.trim() } },
+        options: {
+          data: {
+            display_name: displayName.trim(),
+            username: normalizedUsername,
+          },
+        },
       });
-      if (error) {
-        setError(error.message);
+      if (signUpError) {
+        setError(signUpError.message);
         return;
       }
       if (data.session) {
@@ -47,7 +91,8 @@ export default function RegisterPage() {
       <div className="w-full rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <h1 className="text-xl font-bold">Create your account</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Join NewMediaSocial — no algorithm, just everyone.
+          Join NewMediaSocial — posts, photos, topics, and the people you
+          follow.
         </p>
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
           <div>
@@ -62,8 +107,53 @@ export default function RegisterPage() {
               maxLength={50}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 p-2.5 text-sm outline-none transition focus:border-slate-400"
+              className={inputClasses}
             />
+            <p className="mt-1 text-xs text-slate-400">
+              Permanent — it appears on all your posts.
+            </p>
+          </div>
+          <div>
+            <label htmlFor="username" className="text-sm font-medium">
+              Username
+            </label>
+            <div className="mt-1 flex items-center rounded-lg border border-slate-200 transition focus-within:border-slate-400">
+              <span className="pl-2.5 text-sm text-slate-400">@</span>
+              <input
+                id="username"
+                type="text"
+                required
+                value={username}
+                onChange={(e) => {
+                  setUsername(
+                    e.target.value
+                      .toLowerCase()
+                      .replace(/[^a-z0-9_]/g, "")
+                      .slice(0, 20),
+                  );
+                  setUsernameHint(null);
+                }}
+                onBlur={() => void checkUsername()}
+                className="w-full rounded-r-lg bg-transparent p-2.5 text-sm outline-none"
+              />
+            </div>
+            {usernameHint ? (
+              <p
+                className={`mt-1 text-xs ${
+                  usernameHint === "Available."
+                    ? "text-emerald-600"
+                    : usernameHint === "Already taken."
+                      ? "text-red-600"
+                      : "text-slate-400"
+                }`}
+              >
+                {usernameHint}
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-slate-400">
+                Permanent — your profile lives at /u/username.
+              </p>
+            )}
           </div>
           <div>
             <label htmlFor="email" className="text-sm font-medium">
@@ -76,7 +166,7 @@ export default function RegisterPage() {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 p-2.5 text-sm outline-none transition focus:border-slate-400"
+              className={inputClasses}
             />
           </div>
           <div>
@@ -91,7 +181,7 @@ export default function RegisterPage() {
               autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 p-2.5 text-sm outline-none transition focus:border-slate-400"
+              className={inputClasses}
             />
           </div>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}

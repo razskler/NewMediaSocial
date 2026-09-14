@@ -66,6 +66,9 @@ Same steps as above, but use `DOMAIN=localhost` in `.env`. Caddy will use a
 self-signed local certificate, so accept the browser warning. This runs the
 exact same stack as production.
 
+To run locally just run: "docker compose up -d --build" and then type:
+"localhost" in your browser.
+
 ## Everyday operations
 
 ```bash
