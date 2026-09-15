@@ -89,6 +89,42 @@ export async function followedUserIds(
   return docs.map((d) => d.followeeId);
 }
 
+export async function areMutualFollowers(
+  userId: string,
+  otherUserId: string,
+): Promise<boolean> {
+  const db = await readyDb();
+  const count = await db.collection<FollowDoc>("follows").countDocuments({
+    $or: [
+      { followerId: userId, followeeId: otherUserId },
+      { followerId: otherUserId, followeeId: userId },
+    ],
+  });
+  return count === 2;
+}
+
+export async function mutualFollowerIds(
+  userId: string,
+): Promise<string[]> {
+  const db = await readyDb();
+  const [followingDocs, followerDocs] = await Promise.all([
+    db
+      .collection<FollowDoc>("follows")
+      .find({ followerId: userId })
+      .project<{ followeeId: string }>({ followeeId: 1 })
+      .toArray(),
+    db
+      .collection<FollowDoc>("follows")
+      .find({ followeeId: userId })
+      .project<{ followerId: string }>({ followerId: 1 })
+      .toArray(),
+  ]);
+  const followerSet = new Set(followerDocs.map((d) => d.followerId));
+  return followingDocs
+    .map((d) => d.followeeId)
+    .filter((id) => followerSet.has(id));
+}
+
 export async function followCounts(
   userId: string,
 ): Promise<{ followers: number; following: number }> {

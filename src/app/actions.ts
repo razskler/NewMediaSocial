@@ -20,8 +20,22 @@ import {
   type CommentThread,
   type UserComment,
 } from "@/lib/comments";
-import { toggleFollow } from "@/lib/follows";
+import { toggleFollow, areMutualFollowers } from "@/lib/follows";
 import { mediaExists } from "@/lib/media";
+import {
+  createConversation,
+  getConversationForUser,
+  listConversations,
+  MAX_CONVERSATION_PARTICIPANTS,
+  type Conversation,
+} from "@/lib/conversations";
+import {
+  addMessage,
+  getMessageForSender,
+  listMessages,
+  softDeleteMessage,
+  type Message,
+} from "@/lib/messages";
 import {
   createProfile,
   getProfileByUserId,
@@ -63,6 +77,22 @@ const commentTextSchema = z
   .trim()
   .min(1, "Comments need at least one character.")
   .max(500, "Comments are limited to 500 characters.");
+
+const messageTextSchema = z
+  .string()
+  .trim()
+  .max(500, "Messages are limited to 500 characters.");
+
+const dmTitleSchema = z
+  .string()
+  .trim()
+  .min(1, "Group names need at least one character.")
+  .max(80, "Group names are limited to 80 characters.");
+
+const dmUserIdSchema = z.string().regex(
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+  "Invalid user.",
+);
 
 const bioSchema = z
   .string()
@@ -362,4 +392,205 @@ export async function logoutAction(): Promise<void> {
   const supabase = await createClient();
   await supabase.auth.signOut();
   redirect("/");
+}
+
+export async function startConversationAction(input: {
+  participantUserIds: string[];
+  title: string | null;
+}): Promise<ActionResult<{ conversation: Conversation }>> {
+  const user = await currentUser();
+  if (!user) {
+    return { ok: false, error: "You must be signed in to send messages." };
+  }
+
+  const parsedParticipants = z
+    .array(dmUserIdSchema)
+    .min(1, "Pick at least one person to message.")
+    .max(
+      MAX_CONVERSATION_PARTICIPANTS - 1,
+      `Conversations are limited to ${MAX_CONVERSATION_PARTICIPANTS} people.`,
+    )
+    .safeParse(input.participantUserIds);
+  if (!parsedParticipants.success) {
+    return { ok: false, error: parsedParticipants.error.issues[0].message };
+  }
+
+  const participants = [...new Set(parsedParticipants.data)];
+  if (participants.includes(user.id)) {
+    return { ok: false, error: "You can't start a conversation with yourself." };
+  }
+
+  let title: string | null = null;
+  if (
+    input.title !== null &&
+    input.title !== undefined &&
+    input.title.trim().length > 0
+  ) {
+    const parsedTitle = dmTitleSchema.safeParse(input.title);
+    if (!parsedTitle.success) {
+      return { ok: false, error: parsedTitle.error.issues[0].message };
+    }
+    title = parsedTitle.data;
+  }
+
+  for (const participantId of participants) {
+    if (!(await areMutualFollowers(user.id, participantId))) {
+      return {
+        ok: false,
+        error: "You can only start conversations with mutual follows.",
+      };
+    }
+  }
+
+  try {
+    const conversation = await createConversation({
+      creatorId: user.id,
+      participantIds: participants,
+      title,
+    });
+    return { ok: true, data: { conversation } };
+  } catch {
+    return { ok: false, error: "Could not start that conversation." };
+  }
+}
+
+export async function listConversationsAction(
+  cursor: string | null,
+): Promise<{ conversations: Conversation[]; nextCursor: string | null }> {
+  const user = await currentUser();
+  if (!user) {
+    return { conversations: [], nextCursor: null };
+  }
+  return listConversations(user.id, cursor);
+}
+
+export async function listMessagesAction(
+  conversationId: string,
+  cursor: string | null,
+): Promise<{ messages: Message[]; nextCursor: string | null }> {
+  const user = await currentUser();
+  if (!user) {
+    return { messages: [], nextCursor: null };
+  }
+
+  const parsedId = objectIdSchema.safeParse(conversationId);
+  if (!parsedId.success) {
+    return { messages: [], nextCursor: null };
+  }
+
+  const conversation = await getConversationForUser(parsedId.data, user.id);
+  if (!conversation) {
+    return { messages: [], nextCursor: null };
+  }
+
+  return listMessages(conversation.id, cursor);
+}
+
+export async function sendMessageAction(input: {
+  conversationId: string;
+  text: string;
+  mediaIds: string[];
+}): Promise<ActionResult<{ message: Message }>> {
+  const user = await currentUser();
+  if (!user) {
+    return { ok: false, error: "You must be signed in to send messages." };
+  }
+
+  const parsedConversationId = objectIdSchema.safeParse(input.conversationId);
+  if (!parsedConversationId.success) {
+    return { ok: false, error: "Invalid conversation." };
+  }
+
+  const parsedText = messageTextSchema.safeParse(input.text);
+  if (!parsedText.success) {
+    return { ok: false, error: parsedText.error.issues[0].message };
+  }
+
+  const parsedMedia = mediaIdsSchema.safeParse(input.mediaIds);
+  if (!parsedMedia.success) {
+    return { ok: false, error: parsedMedia.error.issues[0].message };
+  }
+
+  if (parsedText.data.length === 0 && parsedMedia.data.length === 0) {
+    return {
+      ok: false,
+      error: "Write something or attach a photo before sending.",
+    };
+  }
+
+  const mediaObjectIds = parsedMedia.data.map((id) => new ObjectId(id));
+  if (!(await mediaExists(mediaObjectIds))) {
+    return { ok: false, error: "One of the attached photos is missing." };
+  }
+
+  const conversation = await getConversationForUser(
+    parsedConversationId.data,
+    user.id,
+  );
+  if (!conversation) {
+    return { ok: false, error: "That conversation doesn't exist." };
+  }
+
+  const profile = await getProfileByUserId(user.id);
+  const nameParsed = nameSchema.safeParse(
+    profile?.displayName ?? authorNameFromUser(user),
+  );
+
+  try {
+    const message = await addMessage({
+      conversationId: new ObjectId(conversation.id),
+      participantIds: conversation.participants.map((p) => p.userId),
+      senderId: user.id,
+      senderName: nameParsed.success ? nameParsed.data : "Anonymous",
+      text: parsedText.data,
+      mediaIds: mediaObjectIds,
+    });
+    return { ok: true, data: { message } };
+  } catch {
+    return { ok: false, error: "Could not send that message." };
+  }
+}
+
+export async function deleteMessageAction(
+  messageId: string,
+): Promise<ActionResult<{ deleted: boolean }>> {
+  const user = await currentUser();
+  if (!user) {
+    return { ok: false, error: "You must be signed in." };
+  }
+
+  const parsedMessageId = objectIdSchema.safeParse(messageId);
+  if (!parsedMessageId.success) {
+    return { ok: false, error: "Invalid message." };
+  }
+
+  const messageOid = new ObjectId(parsedMessageId.data);
+
+  try {
+    const context = await getMessageForSender(messageOid, user.id);
+    if (!context) {
+      return { ok: false, error: "Message not found." };
+    }
+
+    const conversation = await getConversationForUser(
+      context.conversationId.toHexString(),
+      user.id,
+    );
+    if (!conversation) {
+      return { ok: false, error: "Message not found." };
+    }
+
+    const deleted = await softDeleteMessage({
+      messageId: messageOid,
+      senderId: user.id,
+      conversationId: context.conversationId,
+      participantIds: conversation.participants.map((p) => p.userId),
+    });
+    if (!deleted) {
+      return { ok: false, error: "Could not delete that message." };
+    }
+    return { ok: true, data: { deleted: true } };
+  } catch {
+    return { ok: false, error: "Could not delete that message." };
+  }
 }

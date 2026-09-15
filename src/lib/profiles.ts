@@ -39,6 +39,7 @@ const RESERVED_USERNAMES = new Set([
   "admin",
   "root",
   "newmediasocial",
+  "messages",
 ]);
 
 let indexesReady: Promise<void> | null = null;
@@ -186,7 +187,16 @@ export async function updateProfile(
  */
 export async function authorInfoFor(
   userIds: string[],
-): Promise<Map<string, { username: string; avatarMediaId: string | null }>> {
+): Promise<
+  Map<
+    string,
+    {
+      username: string;
+      displayName: string;
+      avatarMediaId: string | null;
+    }
+  >
+> {
   if (userIds.length === 0) {
     return new Map();
   }
@@ -194,12 +204,22 @@ export async function authorInfoFor(
   const docs = await db
     .collection<ProfileDoc>("profiles")
     .find({ userId: { $in: userIds } })
-    .project<{ userId: string; username: string; avatarMediaId: string | null }>(
-      { userId: 1, username: 1, avatarMediaId: 1 },
-    )
+    .project<{
+      userId: string;
+      username: string;
+      displayName: string;
+      avatarMediaId: string | null;
+    }>({ userId: 1, username: 1, displayName: 1, avatarMediaId: 1 })
     .toArray();
   return new Map(
-    docs.map((d) => [d.userId, { username: d.username, avatarMediaId: d.avatarMediaId }]),
+    docs.map((d) => [
+      d.userId,
+      {
+        username: d.username,
+        displayName: d.displayName,
+        avatarMediaId: d.avatarMediaId,
+      },
+    ]),
   );
 }
 

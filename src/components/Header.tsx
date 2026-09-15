@@ -45,6 +45,12 @@ export default function Header({
               </span>
             )}
             <Link
+              href="/messages"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-200"
+            >
+              Messages
+            </Link>
+            <Link
               href="/settings/profile"
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-200"
             >
