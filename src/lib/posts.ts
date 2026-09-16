@@ -305,13 +305,19 @@ export async function createPost(input: {
   text: string;
   mediaIds?: ObjectId[];
   hashtags?: string[];
+  /**
+   * Backdated creation (used by the bot seeder). Chronological feeds
+   * sort by _id, so the _id is derived from this timestamp — callers
+   * must not pass the same second twice within the collection.
+   */
+  createdAt?: Date;
 }): Promise<Post> {
   const db = await readyDb();
-  const now = new Date();
+  const now = input.createdAt ?? new Date();
   const mediaIds = input.mediaIds ?? [];
   const hashtags = input.hashtags ?? extractHashtags(input.text);
 
-  const result = await db.collection<PostDoc>("posts").insertOne({
+  const doc: PostDoc & { _id?: ObjectId } = {
     authorId: input.authorId,
     authorName: input.authorName,
     text: input.text,
@@ -320,7 +326,12 @@ export async function createPost(input: {
     commentsCount: 0,
     mediaIds,
     hashtags,
-  });
+  };
+  if (input.createdAt) {
+    doc._id = ObjectId.createFromTime(Math.floor(now.getTime() / 1000));
+  }
+
+  const result = await db.collection<PostDoc>("posts").insertOne(doc);
 
   const authorMap = await authorInfoFor([input.authorId]);
   const author = authorMap.get(input.authorId);
@@ -344,6 +355,8 @@ export async function createPost(input: {
 export async function toggleLike(
   postId: string,
   userId: string,
+  /** Backdated like timestamp (bot seeder); _id is derived from it. */
+  createdAt?: Date,
 ): Promise<{ liked: boolean; likesCount: number }> {
   const db = await readyDb();
   if (!ObjectId.isValid(postId)) {
@@ -370,9 +383,17 @@ export async function toggleLike(
   // Like: insert; a duplicate-key error means another request already
   // liked it, which is fine.
   try {
-    await db
-      .collection<LikeDoc>("likes")
-      .insertOne({ postId: pid, userId, createdAt: new Date() });
+    const likeDoc: LikeDoc & { _id?: ObjectId } = {
+      postId: pid,
+      userId,
+      createdAt: createdAt ?? new Date(),
+    };
+    if (createdAt) {
+      likeDoc._id = ObjectId.createFromTime(
+        Math.floor(createdAt.getTime() / 1000),
+      );
+    }
+    await db.collection<LikeDoc>("likes").insertOne(likeDoc);
   } catch (err) {
     if ((err as { code?: number }).code === 11000) {
       const post = await db

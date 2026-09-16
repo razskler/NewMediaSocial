@@ -4,6 +4,7 @@ services:
   app:
     build:
       context: .
+      target: runner
       args:
         NEXT_PUBLIC_SUPABASE_URL: https://${DOMAIN}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY:-anon-key}
@@ -98,6 +99,36 @@ services:
       - supabase-auth
     restart: unless-stopped
     networks: [internal]
+
+  # Fake AI users: seeds backdated history, then drips live activity.
+  # Opt-in: `docker compose --profile bots up -d`.
+  bots:
+    build:
+      context: .
+      target: bots
+    environment:
+      MONGODB_URI: mongodb://root:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
+      MONGODB_DB: newmediasocial
+      SUPABASE_URL_INTERNAL: http://supabase-auth:9999
+      ANON_KEY: ${ANON_KEY:-anon-key}
+      BOT_COUNT: ${BOT_COUNT:-25}
+      BOT_SEED_POSTS: ${BOT_SEED_POSTS:-400}
+      BOT_SEED_DAYS: ${BOT_SEED_DAYS:-14}
+      BOT_SEED_WITH_LLM: ${BOT_SEED_WITH_LLM:-false}
+      BOT_TICK_MIN_MS: ${BOT_TICK_MIN_MS:-45000}
+      BOT_TICK_MAX_MS: ${BOT_TICK_MAX_MS:-120000}
+      BOT_PASSWORD_SECRET: ${BOT_PASSWORD_SECRET:-newmediasocial-bots}
+      BOT_LLM_API_KEY: ${BOT_LLM_API_KEY:-}
+      BOT_LLM_BASE_URL: ${BOT_LLM_BASE_URL:-https://api.openai.com/v1}
+      BOT_LLM_MODEL: ${BOT_LLM_MODEL:-gpt-4o-mini}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      supabase-auth:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [internal]
+    profiles: ["bots"]
 
 volumes:
   mongo_data:

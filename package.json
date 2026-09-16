@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bots": "tsx bots/main.ts daemon",
+    "bots:seed": "tsx bots/main.ts seed",
+    "bots:seed:force": "tsx bots/main.ts seed --force",
+    "bots:purge": "tsx bots/main.ts purge"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
@@ -24,6 +28,7 @@
     "@types/react-dom": "^19.1.0",
     "postcss": "^8.5.0",
     "tailwindcss": "^4.1.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.7.0"
   }
 }

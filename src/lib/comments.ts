@@ -125,6 +125,12 @@ export async function addComment(input: {
   authorId: string;
   authorName: string;
   text: string;
+  /**
+   * Backdated creation (bot seeder). The _id is derived from this
+   * timestamp so comment order matches; callers must not pass the
+   * same second twice within the collection.
+   */
+  createdAt?: Date;
 }): Promise<Comment> {
   const db = await readyDb();
   if (!ObjectId.isValid(input.postId)) {
@@ -149,15 +155,19 @@ export async function addComment(input: {
     }
   }
 
-  const now = new Date();
-  const result = await db.collection<CommentDoc>("comments").insertOne({
+  const now = input.createdAt ?? new Date();
+  const doc: CommentDoc & { _id?: ObjectId } = {
     postId: pid,
     parentId,
     authorId: input.authorId,
     authorName: input.authorName,
     text: input.text,
     createdAt: now,
-  });
+  };
+  if (input.createdAt) {
+    doc._id = ObjectId.createFromTime(Math.floor(now.getTime() / 1000));
+  }
+  const result = await db.collection<CommentDoc>("comments").insertOne(doc);
 
   await db
     .collection("posts")

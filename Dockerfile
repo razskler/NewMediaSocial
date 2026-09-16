@@ -32,3 +32,16 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 USER nextjs
 EXPOSE 3000
 CMD ["node", "server.js"]
+
+# ---- bots: fake-activity seeder/daemon (docker compose --profile bots) ----
+FROM node:22-alpine AS bots
+WORKDIR /app
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1
+# Full node_modules from the deps stage: the bots import src/lib data-layer
+# code directly and run it with tsx.
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json tsconfig.json ./
+COPY src ./src
+COPY bots ./bots
+CMD ["npx", "tsx", "bots/main.ts", "daemon"]
