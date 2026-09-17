@@ -176,6 +176,7 @@ export default async function UserProfilePage({
           />
         ) : postsPage ? (
           <Feed
+            key={tab === "likes" ? "likes" : "posts"}
             initialPosts={postsPage.posts}
             initialCursor={postsPage.nextCursor}
             isAuthed={!!user}

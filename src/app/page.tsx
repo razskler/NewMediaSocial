@@ -86,6 +86,7 @@ export default async function HomePage({
           </p>
         ) : (
           <Feed
+            key={`${mode}:${tag ?? ""}`}
             initialPosts={posts}
             initialCursor={nextCursor}
             isAuthed={!!user}
