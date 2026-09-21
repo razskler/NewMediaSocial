@@ -28,6 +28,9 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?Set MONGO_PASSWORD in .env}
+      # Kernel 6.19-7.0.13 breaks TCMalloc's RSEQ use (SERVER-121912); this makes
+      # glibc register RSEQ first so TCMalloc falls back to its per-thread cache.
+      GLIBC_TUNABLES: glibc.pthread.rseq=1
     volumes:
       - mongo_data:/data/db
     healthcheck:

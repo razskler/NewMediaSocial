@@ -109,6 +109,70 @@ confirmation or password-reset emails, add SMTP settings to the
 `GOTRUE_SMTP_PORT`, `GOTRUE_SMTP_USER`, `GOTRUE_SMTP_PASS`,
 `GOTRUE_SMTP_ADMIN_EMAIL`) and set `GOTRUE_MAILER_AUTOCONFIRM=false`.
 
+## Troubleshooting
+
+Start here: `docker compose ps` shows which container is unhealthy or
+restarting, and `docker compose logs -f <service>` tells you why.
+
+### Mongo crash-loops on Linux kernel 6.19+ (SERVER-121912)
+
+MongoDB 8 refuses to start on kernels 6.19 and newer (TCMalloc/rseq
+incompatibility) and takes the whole stack down with it — `app` waits for
+mongo's healthcheck, so `docker compose up` fails with
+`dependency failed to start: container ... is unhealthy`.
+
+The workaround is already in `docker-compose.yml`:
+
+```yaml
+GLIBC_TUNABLES: glibc.pthread.rseq=1
+```
+
+If mongo still crash-loops with the SERVER-121912 message, make sure you
+are using the current `docker-compose.yml` (an earlier revision shipped
+`=0`, which disables the workaround) and that the container was recreated
+after the change — `docker compose up -d --build` recreates it
+automatically when the config differs.
+
+### 502 on signup/login — supabase-auth is down
+
+Signup and login are the only requests Caddy routes to `supabase-auth`
+(`/auth/v1/*`), so a 502 there while the rest of the site loads means the
+auth container is crash-looping. The usual cause is a stale `pg_data`
+volume: the initdb script that provisions the `supabase_auth_admin` role
+and `auth` schema only runs on an **empty** Postgres volume, so a volume
+that predates the script (or a `POSTGRES_PASSWORD` changed after first
+boot) leaves GoTrue unable to connect. Reset it:
+
+```bash
+docker compose down
+docker volume rm newmediasocial_pg_data   # wipes auth accounts only
+docker compose up -d --build
+```
+
+### Caddy won't start
+
+Ports 80/443 are already taken on the host. Check with
+`ss -tlnp | grep -E ':(80|443)\b'` and stop the culprit — often Apache,
+nginx, or another Docker project publishing the same ports.
+
+### Moving to a new machine
+
+- Clone the repo fresh. Don't copy `docker-compose.yml` or `.env` fragments
+  between machines — you want the current kernel workaround, and secrets
+  should not travel with the source.
+- Never copy Docker volumes (`pg_data`, `mongo_data`) between machines.
+  Fresh machine → fresh volumes → the one-time initdb provisioning runs on
+  first boot. Stale volumes are also what causes the 502 above.
+- Changing `DOMAIN` or `ANON_KEY` requires a rebuild (they are baked into
+  the client bundle at build time); changing the other secrets does not.
+
+### Full reset
+
+```bash
+docker compose down -v   # WARNING: deletes ALL data volumes (posts + accounts)
+docker compose up -d --build
+```
+
 ## Bots (fake users)
 
 The `bots` compose profile creates fake users that post, like, comment,
